@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Eliminar tu cuenta · Kilómetro Cero</title>
+<meta name="robots" content="noindex">
+<style>
+  :root { --ink:#0E0E0C; --muted:#78756E; --surface:#F3F2EE; --orange:#FF6A2B; --orange-dark:#C94A12; --line:#E4E2DB; }
+  * { box-sizing: border-box; }
+  body { margin:0; font:16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; color:var(--ink); background:#fff; padding:0 16px; }
+  main { max-width:560px; margin:48px auto; }
+  h1 { font-size:28px; letter-spacing:-.02em; margin:0 0 8px; }
+  h2 { font-size:17px; margin:0 0 6px; }
+  p, li { color:#57544E; }
+  .card { background:var(--surface); border-radius:22px; padding:20px; margin:16px 0; }
+  label { display:block; font-weight:600; margin:0 0 6px; }
+  input[type=email] { width:100%; font:inherit; padding:12px 14px; border:1px solid var(--line); border-radius:14px; background:#fff; }
+  button { font:inherit; font-weight:600; border:0; border-radius:999px; padding:13px 22px; margin-top:12px; cursor:pointer; background:var(--ink); color:#fff; }
+  button.peligro { background:var(--orange-dark); }
+  button:disabled { opacity:.5; cursor:default; }
+  .aviso { font-size:14px; }
+  .error { color:var(--orange-dark); }
+  [hidden] { display:none !important; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Eliminar tu cuenta de Kilómetro Cero</h1>
+  <p>Al eliminar la cuenta borramos de inmediato y para siempre de nuestros servidores:</p>
+  <ul>
+    <li>tu cuenta (email e inicio de sesión),</li>
+    <li>tu perfil (nombre, alias, peso, pulso máximo y en reposo),</li>
+    <li>tus actividades, rutas, planes y rutinas,</li>
+    <li>tus aportaciones al mapa de calor, tu grupo de liga y tus puntos de corona.</li>
+  </ul>
+  <p class="aviso">Las copias de seguridad del proveedor se eliminan en su ciclo ordinario. Lo que tengas guardado en tu móvil sigue ahí hasta que desinstales la app.</p>
+
+  <div class="card">
+    <h2>Desde la app</h2>
+    <p>Perfil › Cuenta › Eliminar cuenta.</p>
+  </div>
+
+  <div class="card" id="paso-email">
+    <h2>Sin la app</h2>
+    <p>Te enviamos un enlace para confirmar que la cuenta es tuya. No hace falta contraseña.</p>
+    <form id="form-email">
+      <label for="email">Email de tu cuenta</label>
+      <input id="email" type="email" required autocomplete="email">
+      <button type="submit" id="enviar">Enviarme el enlace</button>
+    </form>
+    <p id="enviado" class="aviso" hidden>Si hay una cuenta con ese email, te llegará un enlace en unos minutos. Ábrelo en este mismo navegador.</p>
+  </div>
+
+  <div class="card" id="paso-confirmar" hidden>
+    <h2>Confirmar el borrado</h2>
+    <p>Vas a eliminar la cuenta <strong id="cuenta"></strong>. No se puede deshacer.</p>
+    <label><input type="checkbox" id="entiendo"> Entiendo que se borrarán todos mis datos</label>
+    <button class="peligro" id="borrar" disabled>Eliminar mi cuenta</button>
+  </div>
+
+  <div class="card" id="hecho" hidden>
+    <h2>Cuenta eliminada</h2>
+    <p>Hemos borrado tu cuenta y tus datos. Gracias por haber corrido con nosotros.</p>
+  </div>
+
+  <p id="error" class="error" hidden></p>
+  <p class="aviso">¿Problemas? Escríbenos a <a href="mailto:alejandro99vicente@gmail.com">alejandro99vicente@gmail.com</a>.</p>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.57.4/dist/umd/supabase.js"></script>
+<script>
+  // Proyecto y clave PÚBLICA (publishable/anon). Cambiar por los de producción al publicar.
+  const SUPABASE_URL = "https://tvnwsqwftfrncepgbywr.supabase.co";
+  const SUPABASE_CLAVE_PUBLICA = "sb_publishable_TScYEVrrob4eOu3xp7jpiw_3GX9XuAW";
+
+  const nube = supabase.createClient(SUPABASE_URL, SUPABASE_CLAVE_PUBLICA, { auth: { flowType: "implicit", detectSessionInUrl: true, persistSession: true } });
+  const $ = (id) => document.getElementById(id);
+  const mostrarError = (m) => { $("error").textContent = m; $("error").hidden = !m; };
+
+  $("form-email").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    mostrarError("");
+    $("enviar").disabled = true;
+    const { error } = await nube.auth.signInWithOtp({
+      email: $("email").value.trim(),
+      options: { shouldCreateUser: false, emailRedirectTo: location.origin + location.pathname },
+    });
+    $("enviar").disabled = false;
+    // No revelamos si el email tiene cuenta: mismo mensaje salvo por límites de envío
+    if (error && error.status === 429) return mostrarError("Has pedido demasiados enlaces. Espera unos minutos.");
+    $("form-email").hidden = true;
+    $("enviado").hidden = false;
+  });
+
+  async function comprobarSesion() {
+    const { data } = await nube.auth.getSession();
+    if (!data.session) return;
+    $("paso-email").hidden = true;
+    $("paso-confirmar").hidden = false;
+    $("cuenta").textContent = data.session.user.email;
+    history.replaceState(null, "", location.pathname); // quitar el token de la barra de direcciones
+  }
+
+  $("entiendo").addEventListener("change", (e) => { $("borrar").disabled = !e.target.checked; });
+
+  $("borrar").addEventListener("click", async () => {
+    mostrarError("");
+    $("borrar").disabled = true;
+    const { error } = await nube.rpc("eliminar_mi_cuenta");
+    if (error) { $("borrar").disabled = false; return mostrarError("No se pudo eliminar la cuenta: " + error.message); }
+    await nube.auth.signOut({ scope: "local" });
+    $("paso-confirmar").hidden = true;
+    $("hecho").hidden = false;
+  });
+
+  nube.auth.onAuthStateChange(() => comprobarSesion());
+  comprobarSesion();
+</script>
+</body>
+</html>
