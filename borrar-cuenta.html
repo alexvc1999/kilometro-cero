@@ -29,7 +29,7 @@
   <h1>Eliminar tu cuenta de Kilómetro Cero</h1>
   <p>Al eliminar la cuenta borramos de inmediato y para siempre de nuestros servidores:</p>
   <ul>
-    <li>tu cuenta (email e inicio de sesión),</li>
+    <li>tu cuenta (el email de Google con el que entras),</li>
     <li>tu perfil (nombre, alias, peso, pulso máximo y en reposo),</li>
     <li>tus actividades, rutas, planes y rutinas,</li>
     <li>tus aportaciones al mapa de calor, tu grupo de liga y tus puntos de corona.</li>
@@ -54,13 +54,9 @@
 
   <div class="card" id="paso-email">
     <h2>Sin la app</h2>
-    <p>Te enviamos un enlace para confirmar que la cuenta es tuya. No hace falta contraseña.</p>
-    <form id="form-email">
-      <label for="email">Email de tu cuenta</label>
-      <input id="email" type="email" required autocomplete="email">
-      <button type="submit" id="enviar">Enviarme el enlace</button>
-    </form>
-    <p id="enviado" class="aviso" hidden>Si hay una cuenta con ese email, te llegará un enlace en unos minutos. Ábrelo en este mismo navegador.</p>
+    <p>Entra con la misma cuenta de Google que usas en Kilómetro Cero.</p>
+    <div id="boton-google"></div>
+    <p id="sin-google" class="aviso" hidden>No se ha podido cargar el acceso con Google. Puedes eliminar la cuenta desde la app, en Perfil › Cuenta, o escribirnos.</p>
   </div>
 
   <div class="card" id="paso-confirmar" hidden>
@@ -79,30 +75,41 @@
   <p class="aviso">¿Problemas? Escríbenos a <a href="mailto:alejandro99vicente@gmail.com">alejandro99vicente@gmail.com</a>.</p>
 </main>
 
+<script src="https://accounts.google.com/gsi/client" async></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.57.4/dist/umd/supabase.js"></script>
 <script>
-  // Proyecto y clave PÚBLICA (publishable/anon). Cambiar por los de producción al publicar.
+  // Proyecto y clave PÚBLICA (publishable/anon) y cliente OAuth web. Cambiar por los de producción al publicar.
   const SUPABASE_URL = "https://tvnwsqwftfrncepgbywr.supabase.co";
   const SUPABASE_CLAVE_PUBLICA = "sb_publishable_TScYEVrrob4eOu3xp7jpiw_3GX9XuAW";
+  const GOOGLE_CLIENT_ID = "214661127658-122k1p746e8nihppuqnii56sg14tsja1.apps.googleusercontent.com";
 
-  const nube = supabase.createClient(SUPABASE_URL, SUPABASE_CLAVE_PUBLICA, { auth: { flowType: "implicit", detectSessionInUrl: true, persistSession: true } });
+  const nube = supabase.createClient(SUPABASE_URL, SUPABASE_CLAVE_PUBLICA, { auth: { persistSession: true, detectSessionInUrl: false } });
   const $ = (id) => document.getElementById(id);
   const mostrarError = (m) => { $("error").textContent = m; $("error").hidden = !m; };
 
-  $("form-email").addEventListener("submit", async (e) => {
-    e.preventDefault();
-    mostrarError("");
-    $("enviar").disabled = true;
-    const { error } = await nube.auth.signInWithOtp({
-      email: $("email").value.trim(),
-      options: { shouldCreateUser: false, emailRedirectTo: location.origin + location.pathname },
+  // Google firma el nonce ya cifrado; Supabase comprueba el original
+  const aleatorio = () => Array.from(crypto.getRandomValues(new Uint8Array(24)), (b) => b.toString(16).padStart(2, "0")).join("");
+  async function sha256(texto) {
+    const hash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(texto));
+    return Array.from(new Uint8Array(hash), (b) => b.toString(16).padStart(2, "0")).join("");
+  }
+
+  async function prepararGoogle() {
+    for (let i = 0; i < 40 && !window.google?.accounts?.id; i++) await new Promise((r) => setTimeout(r, 250));
+    if (!window.google?.accounts?.id) { $("sin-google").hidden = false; return; }
+    const nonce = aleatorio();
+    google.accounts.id.initialize({
+      client_id: GOOGLE_CLIENT_ID,
+      nonce: await sha256(nonce),
+      callback: async (respuesta) => {
+        mostrarError("");
+        const { error } = await nube.auth.signInWithIdToken({ provider: "google", token: respuesta.credential, nonce });
+        if (error) return mostrarError("No se pudo entrar: " + error.message);
+        comprobarSesion();
+      },
     });
-    $("enviar").disabled = false;
-    // No revelamos si el email tiene cuenta: mismo mensaje salvo por límites de envío
-    if (error && error.status === 429) return mostrarError("Has pedido demasiados enlaces. Espera unos minutos.");
-    $("form-email").hidden = true;
-    $("enviado").hidden = false;
-  });
+    google.accounts.id.renderButton($("boton-google"), { theme: "outline", size: "large", text: "signin_with", locale: "es" });
+  }
 
   async function comprobarSesion() {
     const { data } = await nube.auth.getSession();
@@ -110,7 +117,6 @@
     $("paso-email").hidden = true;
     $("paso-confirmar").hidden = false;
     $("cuenta").textContent = data.session.user.email;
-    history.replaceState(null, "", location.pathname); // quitar el token de la barra de direcciones
   }
 
   $("entiendo").addEventListener("change", (e) => { $("borrar").disabled = !e.target.checked; });
@@ -125,7 +131,7 @@
     $("hecho").hidden = false;
   });
 
-  nube.auth.onAuthStateChange(() => comprobarSesion());
+  prepararGoogle();
   comprobarSesion();
 </script>
 </body>
